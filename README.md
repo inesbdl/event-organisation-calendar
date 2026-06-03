@@ -20,3 +20,4 @@ npm run preview
 ```
 
 `preview` sert aussi l’API via le plugin Vite.
+# event-organisation-calendar
