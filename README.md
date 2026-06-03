@@ -12,6 +12,7 @@ Application web pour planifier les bénévoles sur un événement : postes, cré
 ## Prérequis
 
 - [Node.js](https://nodejs.org/) 22+ (SQLite via `node:sqlite`)
+- [PM2](https://pm2.keymetrics.io/) en global pour la prod : `npm install -g pm2`
 
 ## Installation
 
@@ -35,17 +36,41 @@ Les données sont persistées dans **`data/planning.db`** (SQLite, ignoré par G
 
 ```bash
 npm run build
-npm run preview
+npm run start
+```
+
+Le serveur écoute par défaut sur [http://localhost:4173](http://localhost:4173) (`PORT` et `HOST` configurables).
+
+## PM2
+
+Installer [PM2](https://pm2.keymetrics.io/) (`npm install -g pm2`), puis :
+
+```bash
+npm run pm2:start    # build + démarrage
+npm run pm2:logs     # journaux
+npm run pm2:restart  # après un nouveau build
+npm run pm2:stop
+```
+
+Configuration : `ecosystem.config.cjs` (app `event-organisation-calendar`, port **4173**).
+
+```bash
+# Changer le port
+PORT=8080 pm2 start ecosystem.config.cjs --update-env
 ```
 
 ## Scripts
 
-| Commande        | Description              |
-|-----------------|--------------------------|
-| `npm run dev`   | Serveur de développement |
-| `npm run build` | Build TypeScript + Vite  |
-| `npm run preview` | Aperçu du build        |
-| `npm run lint`  | ESLint                   |
+| Commande | Description |
+|----------|-------------|
+| `npm run dev` | Serveur de développement (Vite) |
+| `npm run build` | Build frontend + vérif TypeScript |
+| `npm run start` | Serveur prod (static + API SQLite) |
+| `npm run preview` | Aperçu via Vite preview |
+| `npm run pm2:start` | Build + lancement PM2 |
+| `npm run pm2:restart` | Redémarrage PM2 |
+| `npm run pm2:stop` | Arrêt PM2 |
+| `npm run lint` | ESLint |
 
 ## Stack
 
@@ -57,7 +82,8 @@ npm run preview
 
 ```
 ├── public/          # Favicon, assets statiques
-├── server/          # API et plugin Vite
+├── server/          # API, serveur prod, plugin Vite
+├── ecosystem.config.cjs
 ├── src/             # Interface React
 ├── data/            # planning.db (généré localement)
 └── postcss.config.mjs
