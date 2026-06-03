@@ -4,8 +4,11 @@ dist/
 dist-ssr/
 *.tsbuildinfo
 
-# Données locales (JSON généré au runtime)
+# Données locales (SQLite + ancien JSON)
 data/*.json
+data/*.db
+data/*.db-shm
+data/*.db-wal
 !data/.gitkeep
 
 # Variables d'environnement

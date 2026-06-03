@@ -11,7 +11,7 @@ Application web pour planifier les bénévoles sur un événement : postes, cré
 
 ## Prérequis
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22+ (SQLite via `node:sqlite`)
 
 ## Installation
 
@@ -29,7 +29,7 @@ npm run dev
 
 Ouvrir [http://localhost:5173](http://localhost:5173). L’API est intégrée au serveur Vite (plugin dans `server/`).
 
-Les données sont persistées dans `data/store.json` (fichier local, ignoré par Git).
+Les données sont persistées dans **`data/planning.db`** (SQLite, ignoré par Git). Au premier lancement, un ancien `data/store.json` est importé automatiquement s’il existe.
 
 ## Production
 
@@ -51,7 +51,7 @@ npm run preview
 
 - React 19, TypeScript, Vite 8
 - Tailwind CSS 4, Lucide React
-- Persistance JSON (`server/data-store.ts`, `server/api-handlers.ts`)
+- Persistance SQLite (`node:sqlite`, `server/db.ts`, `server/repository.ts`)
 
 ## Structure
 
@@ -59,7 +59,7 @@ npm run preview
 ├── public/          # Favicon, assets statiques
 ├── server/          # API et plugin Vite
 ├── src/             # Interface React
-├── data/            # store.json (généré localement)
+├── data/            # planning.db (généré localement)
 └── postcss.config.mjs
 ```
 

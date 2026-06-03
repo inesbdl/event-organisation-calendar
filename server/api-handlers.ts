@@ -1,45 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'http'
-import { generateTimeSlots } from './timeSlots.js'
-import { readStore, updateStore, type Store } from './data-store.js'
+import * as repo from './repository.js'
 
 const VOLUNTEER_COLORS = [
   '#f97316', '#06b6d4', '#a855f7', '#22c55e', '#ec4899',
   '#eab308', '#3b82f6', '#ef4444', '#14b8a6', '#8b5cf6',
 ]
-
-function getEventState(store: Store, eventId: string) {
-  const event = store.events.find((e) => e.id === eventId)
-  if (!event) return null
-
-  const posts = store.posts
-    .filter((p) => p.event_id === eventId)
-    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
-
-  const volunteers = store.volunteers
-    .filter((v) => v.event_id === eventId)
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  const volunteerIds = new Set(volunteers.map((v) => v.id))
-  const availabilities = store.availabilities.filter((a) =>
-    volunteerIds.has(a.volunteer_id),
-  )
-  const assignments = store.assignments.filter((a) =>
-    volunteerIds.has(a.volunteer_id),
-  )
-
-  const postIds = new Set(posts.map((p) => p.id))
-  const closures = (store.closures ?? []).filter((c) => postIds.has(c.post_id))
-
-  return {
-    event,
-    timeSlots: generateTimeSlots(event.start_time, event.end_time),
-    posts,
-    volunteers,
-    availabilities,
-    assignments,
-    closures,
-  }
-}
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
@@ -122,12 +87,10 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
 
   try {
     const body = (await readBody(req)) as Record<string, unknown>
-    const store = readStore()
 
     switch (route.name) {
       case 'listEvents': {
-        const events = [...store.events].sort((a, b) => b.created_at - a.created_at)
-        send(res, 200, events)
+        send(res, 200, repo.listEvents())
         return
       }
 
@@ -137,22 +100,17 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
           send(res, 400, { error: 'Nom et horaires requis' })
           return
         }
-        const id = crypto.randomUUID()
-        updateStore((s) => {
-          s.events.push({
-            id,
-            name: name.trim(),
-            start_time: String(startTime),
-            end_time: String(endTime),
-            created_at: Math.floor(Date.now() / 1000),
-          })
+        const id = repo.createEvent({
+          name: name.trim(),
+          startTime: String(startTime),
+          endTime: String(endTime),
         })
         send(res, 201, { id })
         return
       }
 
       case 'getEvent': {
-        const state = getEventState(store, route.params.id)
+        const state = repo.getEventState(route.params.id)
         if (!state) {
           send(res, 404, { error: 'Événement introuvable' })
           return
@@ -162,21 +120,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
       }
 
       case 'deleteEvent': {
-        const id = route.params.id
-        updateStore((s) => {
-          const postIds = new Set(
-            s.posts.filter((p) => p.event_id === id).map((p) => p.id),
-          )
-          s.events = s.events.filter((e) => e.id !== id)
-          s.posts = s.posts.filter((p) => p.event_id !== id)
-          const volIds = new Set(
-            s.volunteers.filter((v) => v.event_id === id).map((v) => v.id),
-          )
-          s.volunteers = s.volunteers.filter((v) => v.event_id !== id)
-          s.availabilities = s.availabilities.filter((a) => !volIds.has(a.volunteer_id))
-          s.assignments = s.assignments.filter((a) => !volIds.has(a.volunteer_id))
-          s.closures = (s.closures ?? []).filter((c) => !postIds.has(c.post_id))
-        })
+        repo.deleteEvent(route.params.id)
         send(res, 204)
         return
       }
@@ -187,20 +131,9 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
           send(res, 400, { error: 'Nom du poste requis' })
           return
         }
-        const eventId = route.params.eventId
-        const id = crypto.randomUUID()
-        updateStore((s) => {
-          const maxOrder = Math.max(
-            -1,
-            ...s.posts.filter((p) => p.event_id === eventId).map((p) => p.sort_order),
-          )
-          s.posts.push({
-            id,
-            event_id: eventId,
-            name: name.trim(),
-            required_count: Math.max(1, Number(requiredCount) || 1),
-            sort_order: maxOrder + 1,
-          })
+        const id = repo.addPost(route.params.eventId, {
+          name: name.trim(),
+          requiredCount: Number(requiredCount) || 1,
         })
         send(res, 201, { id })
         return
@@ -208,13 +141,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
 
       case 'patchPost':
       case 'deletePost': {
-        send(res, route.name === 'deletePost' ? 204 : 200, route.name === 'deletePost' ? undefined : { ok: true })
         if (route.name === 'deletePost') {
-          updateStore((s) => {
-            s.posts = s.posts.filter((p) => p.id !== route.params.id)
-            s.assignments = s.assignments.filter((a) => a.post_id !== route.params.id)
-            s.closures = (s.closures ?? []).filter((c) => c.post_id !== route.params.id)
-          })
+          repo.deletePost(route.params.id)
+          send(res, 204)
+        } else {
+          send(res, 200, { ok: true })
         }
         return
       }
@@ -226,48 +157,24 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
           return
         }
         const eventId = route.params.eventId
-        const count = store.volunteers.filter((v) => v.event_id === eventId).length
-        const id = crypto.randomUUID()
+        const count = repo.countVolunteers(eventId)
         const color = VOLUNTEER_COLORS[count % VOLUNTEER_COLORS.length]
-        updateStore((s) => {
-          s.volunteers.push({
-            id,
-            event_id: eventId,
-            name: name.trim(),
-            color,
-          })
-        })
+        const { id } = repo.addVolunteer(eventId, { name: name.trim(), color })
         send(res, 201, { id, color })
         return
       }
 
       case 'deleteVolunteer': {
-        const id = route.params.id
-        updateStore((s) => {
-          s.volunteers = s.volunteers.filter((v) => v.id !== id)
-          s.availabilities = s.availabilities.filter((a) => a.volunteer_id !== id)
-          s.assignments = s.assignments.filter((a) => a.volunteer_id !== id)
-        })
+        repo.deleteVolunteer(route.params.id)
         send(res, 204)
         return
       }
 
       case 'toggleAvailability': {
-        const volunteerId = route.params.id
-        const slotIndex = Number(route.params.slotIndex)
-        let available = false
-        updateStore((s) => {
-          const idx = s.availabilities.findIndex(
-            (a) => a.volunteer_id === volunteerId && a.slot_index === slotIndex,
-          )
-          if (idx >= 0) {
-            s.availabilities.splice(idx, 1)
-            available = false
-          } else {
-            s.availabilities.push({ volunteer_id: volunteerId, slot_index: slotIndex })
-            available = true
-          }
-        })
+        const available = repo.toggleAvailability(
+          route.params.id,
+          Number(route.params.slotIndex),
+        )
         send(res, 200, { available })
         return
       }
@@ -279,53 +186,27 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
           return
         }
         const slot = Number(slotIndex)
-        const fresh = readStore()
-        const existing = fresh.assignments.find(
-          (a) =>
-            a.volunteer_id === volunteerId &&
-            a.post_id === postId &&
-            a.slot_index === slot,
-        )
-        if (existing) {
-          updateStore((s) => {
-            s.assignments = s.assignments.filter(
-              (a) =>
-                !(
-                  a.volunteer_id === volunteerId &&
-                  a.post_id === postId &&
-                  a.slot_index === slot
-                ),
-            )
-          })
+        const vid = String(volunteerId)
+        const pid = String(postId)
+
+        if (repo.findAssignment(vid, pid, slot)) {
+          repo.removeAssignment(vid, pid, slot)
           send(res, 200, { assigned: false })
           return
         }
-        const closed = (fresh.closures ?? []).some(
-          (c) => c.post_id === postId && c.slot_index === slot,
-        )
-        if (closed) {
+        if (repo.isSlotClosed(pid, slot)) {
           send(res, 400, { error: 'Créneau marqué sans besoin de bénévole' })
           return
         }
-        const post = fresh.posts.find((p) => p.id === postId)
-        if (!post) {
+        if (!repo.findPost(pid)) {
           send(res, 404, { error: 'Poste introuvable' })
           return
         }
-        const conflict = fresh.assignments.some(
-          (a) => a.volunteer_id === volunteerId && a.slot_index === slot,
-        )
-        if (conflict) {
+        if (repo.hasAssignmentConflict(vid, slot)) {
           send(res, 400, { error: 'Le bénévole est déjà affecté sur ce créneau' })
           return
         }
-        updateStore((s) => {
-          s.assignments.push({
-            volunteer_id: String(volunteerId),
-            post_id: String(postId),
-            slot_index: slot,
-          })
-        })
+        repo.addAssignment(vid, pid, slot)
         send(res, 200, { assigned: true })
         return
       }
@@ -344,37 +225,12 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
         const slot = Number(slotIndex)
 
         if (scope === 'column' && eventId) {
-          const eventPosts = store.posts.filter((p) => p.event_id === eventId)
-          if (eventPosts.length === 0) {
+          if (repo.listPostsForEvent(String(eventId)).length === 0) {
             send(res, 400, { error: 'Aucun poste' })
             return
           }
-          const allClosed = eventPosts.every((p) =>
-            (store.closures ?? []).some(
-              (c) => c.post_id === p.id && c.slot_index === slot,
-            ),
-          )
-          updateStore((s) => {
-            if (!s.closures) s.closures = []
-            if (allClosed) {
-              const ids = new Set(eventPosts.map((p) => p.id))
-              s.closures = s.closures.filter(
-                (c) => !(ids.has(c.post_id) && c.slot_index === slot),
-              )
-            } else {
-              for (const p of eventPosts) {
-                const exists = s.closures.some(
-                  (c) => c.post_id === p.id && c.slot_index === slot,
-                )
-                if (!exists) s.closures.push({ post_id: p.id, slot_index: slot })
-              }
-              const ids = new Set(eventPosts.map((p) => p.id))
-              s.assignments = s.assignments.filter(
-                (a) => !(ids.has(a.post_id) && a.slot_index === slot),
-              )
-            }
-          })
-          send(res, 200, { closed: !allClosed })
+          const closed = repo.toggleColumnClosure(String(eventId), slot)
+          send(res, 200, { closed })
           return
         }
 
@@ -382,24 +238,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
           send(res, 400, { error: 'Poste requis' })
           return
         }
-        const fresh = readStore()
-        const exists = (fresh.closures ?? []).some(
-          (c) => c.post_id === postId && c.slot_index === slot,
-        )
-        updateStore((s) => {
-          if (!s.closures) s.closures = []
-          if (exists) {
-            s.closures = s.closures.filter(
-              (c) => !(c.post_id === postId && c.slot_index === slot),
-            )
-          } else {
-            s.closures.push({ post_id: String(postId), slot_index: slot })
-            s.assignments = s.assignments.filter(
-              (a) => !(a.post_id === postId && a.slot_index === slot),
-            )
-          }
-        })
-        send(res, 200, { closed: !exists })
+        const closed = repo.toggleCellClosure(String(postId), slot)
+        send(res, 200, { closed })
         return
       }
 
