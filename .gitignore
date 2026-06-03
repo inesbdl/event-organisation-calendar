@@ -1,0 +1,44 @@
+# Dépendances et build
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Données locales (JSON généré au runtime)
+data/*.json
+!data/.gitkeep
+
+# Variables d'environnement
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Cache outils
+.vite/
+.cache/
+.eslintcache
+
+# Système et éditeurs
+.DS_Store
+Thumbs.db
+*.local
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cursor
+.cursor/
